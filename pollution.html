@@ -1,0 +1,503 @@
+﻿<html>
+    <head>
+        <title>Pollution</title>
+        <link rel='stylesheet' href='https://fonts.googleapis.com/css?family=Quicksand'>
+        <link rel="stylesheet" href="css/bootstrap.min.css">
+        <script src="js/jquery-3.4.1.min.js"></script>
+        <script src="js/bootstrap.min.js"></script>
+        
+        <style type="text/css">
+            body {
+                text-align: center;
+                background-color: #f4f7f9;
+                font-family: 'Quicksand', sans-serif;
+            }
+
+            a:hover {
+                cursor: pointer;
+            }
+
+            table {
+                min-width: 300px;
+                width: auto !important;
+                margin: auto;
+            }
+
+            #filters {
+                margin-top: 10px;
+            }
+
+            #filters label,
+            #filters button {
+                margin-left: 10px;
+            }
+
+            #loading {
+                font-weight: bold;
+                display: none;
+                margin: 10px 0;
+            }
+
+            #error {
+                color: red;
+                margin-top: 10px;
+            }
+
+            #results {
+                margin-top: 30px;
+            }
+
+            #tableHeader {
+                font-size: 16px;
+                margin: 10px 0;
+            }
+
+            #modalBodyIframe {
+                border: 0;
+                width: 100%;
+                height: 500px;
+            }
+        </style>
+    </head>
+    <body>
+        <script type="text/javascript">
+            var availableCountries = ["france", "germany", "poland", "spain"];
+            var resultsToTake = 10;
+
+            function find() {
+                hideError();
+                hideResults();
+
+                var validationResult = validateFilters();
+                if (!validationResult.isValid) {
+                    showError(validationResult.errors);
+                    hideResults();
+                    return;
+                }
+
+                var countryName = getSelectedCountryName();
+                var countryCode = getSelectedCountryCode(countryName);
+                if (!countryCode) {
+                    showError("Selected country is invalid");
+                    hideResults();
+                    return;
+                }
+
+                var paramCode = getOrderByParamCode();
+                var paramName = getOrderByParamName();
+
+                setUrlParam("country", countryName);
+                setUrlParam("param", paramCode);
+
+                loading(true);
+
+                httpGet("https://api.openaq.org/v1/latest?limit=1000000&country=" + countryCode)
+                    .then(responseData => {
+                        loading(false);
+
+                        var jsonData = JSON.parse(responseData);
+                        var results = jsonData.results;
+                        var cities = [];
+
+                        for (var i = 0; i < results.length; i++) {
+                            var cityName = results[i].city;
+                            var cityIndex = findIndexWithAttr(cities, "name", cityName);
+                            if (cityIndex < 0) {
+                                cities.push({
+                                    name: cityName,
+                                    locations: 1,
+                                    measurements: []
+                                });
+                            } else {
+                                cities[cityIndex].locations++;
+                            };
+
+                            cityIndex = cityIndex < 0 ? cities.length - 1 : cityIndex;
+                            for (var j = 0; j < results[i].measurements.length; j++) {
+                                var measIndex = findIndexWithAttr(cities[cityIndex].measurements, "param", results[i].measurements[j].parameter);
+                                if (measIndex < 0) {
+                                    cities[cityIndex].measurements.push({
+                                        param: results[i].measurements[j].parameter,
+                                        value: results[i].measurements[j].value,
+                                        unit: results[i].measurements[j].unit
+                                    });
+                                } else {
+                                    if (cities[cityIndex].measurements[measIndex].value < results[i].measurements[j].value) {
+                                        cities[cityIndex].measurements[measIndex].value = results[i].measurements[j].value
+                                    }
+                                }
+                            }
+                        }
+
+                        var result = findTopNByParam(cities, paramCode, resultsToTake);
+                        showResults(result, paramName);
+                    })
+                    .catch(message => {
+                        loading(false);
+                        showError(message);
+                        hideResults();
+                    })
+            }
+
+            function loading(isLoading) {
+                var loadingBlock = document.getElementById("loading");
+                loadingBlock.style.display = isLoading === true ? "block" : "none";
+
+                if (isLoading === true) {
+                    hideError();
+                    hideResults();
+                }
+            }
+
+            function modalLoading(isLoading) {
+                var loadingBlock = document.getElementById("modalLoading");
+                loadingBlock.style.display = isLoading === true ? "block" : "none";
+
+                var modalBodyIframe = document.getElementById("modalBodyIframe");
+                modalBodyIframe.style.display = isLoading === true ? "none" : "block";
+            }
+
+            function findTopNByParam(cities, paramCode, count) {
+                var i, array, itemsToTake;
+                switch (paramCode) {
+                    case "pm25":
+                    case "pm10": 
+                        var array = cities.map(function(city) {
+                            var measIndex = findIndexWithAttr(city.measurements, "param", paramCode);
+                            return {
+                                city: city.name,
+                                value: measIndex < 0 ? null : city.measurements[measIndex].value
+                            };
+                        })
+                        .filter(function(item) { return item.value !== null; })
+                        .sort(function(a, b) { return b.value - a.value; });
+                        itemsToTake = count > array.length ? array.length : count;
+                        return array.slice(0, itemsToTake);
+                    case  "count":
+                        var array = cities.map(function(city) {
+                            return {
+                                city: city.name,
+                                value: city.measurements.length
+                            };
+                        })
+                        .filter(function(item) { return item.value !== null; })
+                        .sort(function(a, b) { return b.value - a.value; });
+                        itemsToTake = count > array.length ? array.length : count;
+                        return array.slice(0, itemsToTake);
+                    break;
+                }
+
+                return;
+            }
+
+            function getSelectedCountryName() {
+                return document.getElementById("country").value;
+            }
+
+            function getOrderByParamCode() {
+                var orederBySelect = document.getElementById("orderBy");
+                return orederBySelect.options[orederBySelect.selectedIndex].value;
+            }
+
+            function getOrderByParamName() {
+                var orederBySelect = document.getElementById("orderBy");
+                return orederBySelect.options[orederBySelect.selectedIndex].innerText;
+            }
+
+            function validateFilters() {
+                var errors = [];
+
+                var selectedCountryName = getSelectedCountryName();
+                if (availableCountries.indexOf(selectedCountryName.toLowerCase()) < 0) {
+                    errors.push("Selected country is invalid");
+                }
+
+                var orderBySelect = document.getElementById("orderBy");
+                if (orderBySelect.selectedIndex === -1) {
+                    errors.push("Parameter should be selected");
+                }
+
+                if (errors.length > 0) {
+                    return {
+                        isValid: false,
+                        errors: errors
+                    }
+                }
+
+                return {
+                    isValid: true
+                }
+            }
+
+            function getSelectedCountryCode(countryName) {
+                switch (countryName.toLowerCase()) {
+                    case "france": return "FR";
+                    case "germany": return "DE";
+                    case "poland": return "PL";
+                    case "spain": return "ES";
+                }
+                return null;
+            }
+
+            function showWikiData(cityName) {
+                hideModalError();
+                hideModalResults();
+
+                modalLoading(true);
+
+                var url = "https://en.wikipedia.org/api/rest_v1/page/summary/" + encodeURI(cityName);
+                httpGet(url)
+                    .then(response => {
+                        modalLoading(false);
+                        showModalResults(cityName);
+                    })
+                    .catch(message => {
+                        modalLoading(false);
+                        showModalError("City is not present in wiki database");
+                        hideModalResults();
+                    })
+
+                $('#wikiModal').modal("show");
+            }
+
+            function showResults(data, paramName) {
+                var block = document.getElementById("results");
+                var tableHeaderBlock = document.getElementById("tableHeader");
+                var dataTableBlock = document.getElementById("dataTable");
+                dataTableBlock.innerHTML = "";
+
+                tableHeaderBlock.innerText = "Top " + data.length + " cities by " + paramName;
+
+                var table = document.createElement('table');
+                table.classList.add("table");
+                var thead = document.createElement('thead');
+                var tbody = document.createElement('tbody');
+                var headerRow = document.createElement('tr');
+                var cityNameHeader = document.createElement('th');
+                var paramValueHeader = document.createElement('th');
+                cityNameHeader.innerHTML = "City name";
+                paramValueHeader.innerHTML = "Value";
+
+                headerRow.appendChild(cityNameHeader);
+                headerRow.appendChild(paramValueHeader);
+                thead.appendChild(headerRow);
+
+                for (var i = 0; i < data.length; i++) {
+                    var tr = document.createElement('tr');
+
+                    var cityNameCell = document.createElement('td');
+                    var paramValueCell = document.createElement('td');
+
+                    cityNameCell.innerHTML = "<a onclick='showWikiData(\"" + data[i].city + "\")'>" + data[i].city + "</a>";
+                    paramValueCell.innerText = data[i].value;
+
+                    tr.appendChild(cityNameCell);
+                    tr.appendChild(paramValueCell);
+
+                    tbody.appendChild(tr);
+                }
+                table.appendChild(thead);
+                table.appendChild(tbody);
+                dataTableBlock.appendChild(table)
+
+                block.style.display = "block";
+            }
+
+            function hideResults() {
+                var block = document.getElementById("results");
+                block.style.display = "none";
+            }
+
+            function showError(messages) {
+                var block = document.getElementById("error");
+                var message = "";
+                if (Array.isArray(messages)) {
+                    message = messages.join("\r");
+                }
+                else {
+                    message = messages;
+                }
+                block.innerText = message;
+                block.style.display = "block";
+            }
+
+            function hideError() {
+                var block = document.getElementById("error");
+                block.innerText = null;
+                block.style.display = "none";
+            }
+
+            function showModalError(messages) {
+                var block = document.getElementById("modalError");
+                var message = "";
+                if (Array.isArray(messages)) {
+                    message = messages.join("\r");
+                }
+                else {
+                    message = messages;
+                }
+                block.innerText = message;
+                block.style.display = "block";
+            }
+
+            function hideModalError() {
+                var block = document.getElementById("modalError");
+                block.innerText = null;
+                block.style.display = "none";
+            }
+
+            function showModalResults(cityName) {
+                var iframe = document.getElementById("modalBodyIframe");
+                iframe.src = "https://en.m.wikipedia.org/wiki/" + encodeURI(cityName);
+                iframe.style.display = "block";
+            }
+
+            function hideModalResults() {
+                var iframe = document.getElementById("modalBodyIframe");
+                iframe.style.display = "none";
+            }
+
+            function httpGet(url) {
+                return new Promise((resolve, reject) => {
+                    var xhr = new XMLHttpRequest();
+                    xhr.open("GET", url, true);
+                    xhr.onload = function () {
+                        if (xhr.status !== 200) {
+                            reject(xhr.status + ": " + xhr.statusText);
+                        }
+                        resolve(xhr.response);
+                    };
+                    xhr.onerror = function () {
+                        reject("Network error");
+                    };
+                    xhr.send();
+                })
+            }
+
+            function findIndexWithAttr(array, attr, value) {
+                for(var i = 0; i < array.length; i += 1) {
+                    if(array[i][attr] === value) {
+                        return i;
+                    }
+                }
+                return -1;
+            }
+
+            window.onload = function() {
+                var countryInput = document.getElementById("country");
+                var orderBySelect = document.getElementById("orderBy");
+
+                var urlParams = getUrlParams();
+
+                var countryUrlValue = urlParams["country"];
+                var paramUrlValue = urlParams["param"];
+
+                countryInput.value = countryUrlValue ? countryUrlValue : "";
+                orderBySelect.value = paramUrlValue ? paramUrlValue : "";
+            };
+
+            function getUrlParams() {
+                var params = {};
+
+                if (window.location.search) {
+                    var parts = window.location.search.substring(1).split('&');
+
+                    for (var i = 0; i < parts.length; i++) {
+                        var nv = parts[i].split('=');
+                        if (!nv[0]) continue;
+                        params[nv[0]] = nv[1];
+                    }
+                }
+
+                return params;
+            }
+
+            function setUrlParam(key, value)
+            {
+                key = encodeURI(key); 
+                value = encodeURI(value);
+
+                var parts = document.location.search.substr(1).split('&');
+
+                var i = parts.length; 
+                var x; 
+                while(i--) 
+                {
+                    x = parts[i].split('=');
+
+                    if (x[0]==key)
+                    {
+                        x[1] = value;
+                        parts[i] = x.join('=');
+                        break;
+                    }
+                }
+
+                if(i < 0) {
+                    parts[parts.length] = [key, value].join('=');
+                }
+
+                window.history.pushState(null, "", window.location.origin + window.location.pathname + "?" + parts.join('&'));
+            }
+        </script>
+
+        <div>
+            <div id="filters">
+                <div class="form-inline">
+                    <div class="form-group">
+                        <label for="country">Country:</label>
+                        <input id="country" class="form-control" type="text" autocomplete="on" list="country-list" />
+                        <datalist id="country-list">
+                            <option value="France">
+                            <option value="Germany">
+                            <option value="Poland">
+                            <option value="Spain">
+                        </datalist>
+                    </div>
+                    <div class="form-group">
+                        <label for="orderBy">Sort By:</label>
+                        <select id="orderBy" class="form-control">
+                            <option value="pm25">pm25</option>
+                            <option value="pm10">pm10</option>
+                            <option value="count">Measurements count</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-default" onclick="find()">Find</button>
+                </div>
+            </div>
+
+            <div id="error"></div>
+
+            <div id="loading">Loading...</div>
+            
+            <div id="results">
+                <div id="tableHeader"></div>
+
+                <div id="dataTable"></div>
+            </div>
+
+            <div id="wikiModal" class="modal fade" tabindex="-1" role="dialog">
+                <div class="modal-dialog" role="document">
+                    <div class="modal-content">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                        <h4 class="modal-title">Wikipedia</h4>
+                    </div>
+                    <div class="modal-body">
+                        <iframe id="modalBodyIframe"></iframe>
+
+                        <div id="modalLoading">Loading...</div>
+
+                        <div id="modalError"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+                    </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </body>
+    
+
+</html>
