@@ -13,8 +13,8 @@ Google Chrome or any other browser.
 
 ### Installing
 
-1. Download respository.
-2.Launch index.html file.
+* Download respository.
+* Launch index.html file.
 
 ## Built With
 
