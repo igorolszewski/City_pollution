@@ -46,4 +46,4 @@ I have styled the app using https://codepen.io/mantovanig/pen/xVqzEE as an inspi
 * get rid of !important
 * get rid of id's
 * rewrite CSS3 to SCSS
-rewrite with react
+* rewrite with react
