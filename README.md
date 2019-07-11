@@ -29,9 +29,7 @@ API that I have used:
 
 ## Authors
 
-* **Igor Olszewski** - *Initial work* - [PurpleBooth](https://github.com/PurpleBooth)
-
-See also the list of [contributors](https://github.com/your/project/contributors) who participated in this project.
+* **Igor Olszewski** 
 
 ## License
 open source. feel free to develop this idea further.
